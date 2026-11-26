@@ -1,0 +1,1329 @@
+openapi: 3.0.3
+info:
+  title: APsystems OpenAPI (End User)
+  description: |
+    REST API for APsystems (Altenergy Power System Inc.) EMA platform data.
+    Delivers JSON via HTTPS. Categories: System Details, System-level Data,
+    ECU-level Data, Meter-level Data, Inverter-level Data, Storage-level Data.
+
+    ## Credentials
+
+    An API account is obtained by sending an application email to APsystems
+    support (who you are, why you want to register an OpenAPI account, what
+    you will do with the data). When approved, you receive an email with:
+
+    - **App Id**: unique identifier per OpenAPI account, a 32-character
+      alphanumeric string. It cannot be changed after signing up.
+    - **App Secret**: the secret used to compute request signatures, a
+      12-character alphanumeric string. It has a default value initially;
+      to change it, contact APsystems by email.
+
+    Keep both values secret.
+
+    ## Authentication (signature-based)
+
+    Every request must include the following headers. The signature is an HMAC
+    of the App Secret over a `stringToSign` built from the request:
+
+    | Header | Description |
+    |---|---|
+    | `X-CA-AppId` | The App Id of the OpenAPI account. |
+    | `X-CA-Timestamp` | The timestamp of the request. The manual does not specify the format; community implementations use Unix epoch milliseconds. |
+    | `X-CA-Nonce` | UUID, a 32-character hex string, e.g. `5e36eab8295911ee90751eff13c2920b`. |
+    | `X-CA-Signature-Method` | `HmacSHA256` or `HmacSHA1`. |
+    | `X-CA-Signature` | The computed signature (see below). |
+
+    ```
+    stringToSign = X-CA-Timestamp + "/" + X-CA-Nonce + "/" + X-CA-AppId + "/"
+                 + RequestPath + "/" + HTTPMethod + "/" + X-CA-Signature-Method
+    ```
+
+    where `RequestPath` is the last segment of the path and
+    `X-CA-Signature-Method` is `HmacSHA256` or `HmacSHA1`. The signature is the
+    Base64 encoding of the HMAC digest computed with the App Secret (UTF-8).
+
+    ```
+    Mac mac = Mac.getInstance("HmacSHA256");
+    byte[] secret = appSecret.getBytes(StandardCharsets.UTF_8);
+    mac.init(new SecretKeySpec(secret, 0, secret.length, "HmacSHA256"));
+    String signature = Base64.getEncoder().encodeToString(
+        mac.doFinal(stringToSign.getBytes(StandardCharsets.UTF_8)));
+    ```
+
+    An API account (App Id + App Secret) is obtained by application email to
+    APsystems support. Access to some data categories may require additional
+    authorization and payment.
+
+    ## Response codes (Annex 1)
+
+    Every JSON response body carries a `code` field:
+
+    | Code | Description |
+    |---|---|
+    | 0 | Succeed to request. |
+    | 1000 | Data exception. |
+    | 1001 | No data. |
+    | 2000 | Application account exception. |
+    | 2001 | Invalid application account. |
+    | 2002 | The application account is not authorized. |
+    | 2003 | Application account authorization expires. |
+    | 2004 | The application account has no permission. |
+    | 2005 | The access limit of the application account was exceeded. |
+    | 3000 | Access token exception. |
+    | 3001 | Missing Access token. |
+    | 3002 | Unable to verify Access token. |
+    | 3003 | Access token timeout. |
+    | 3004 | Refresh token timeout. |
+    | 4000 | Request parameter exception. |
+    | 4001 | Invalid request parameter. |
+    | 5000 | Internal server exception. |
+    | 6000 | Communication exception. |
+    | 7000 | Server access restriction exception. |
+    | 7001 | Server access limit exceeded. |
+    | 7002 | Too many requests, please request later. |
+    | 7003 | The system is busy, please request later. |
+
+    ## Notes
+
+    - All energy values are returned as strings, unit kWh unless stated otherwise.
+    - If `date_range` is later than the current time, the request is rejected.
+    - Shared sub-user systems: an ECU id such as `2030000001236-002405253708`
+      encodes the main ECU before the `-` and the sub-user virtual ECU after it;
+      subsequent data queries must use the virtual ECU number as `eid`.
+  version: 1.8.0
+  contact:
+    name: APsystems Support
+    url: https://www.apsystemsema.com
+servers:
+  - url: https://api.apsystemsema.com:9282
+    description: APsystems EMA OpenAPI production server
+tags:
+  - name: System Details
+    description: System, inverter, ECU and meter inventory
+  - name: System-level Data
+    description: Accumulative energy for a whole system
+  - name: ECU-level Data
+    description: Accumulative energy for an ECU
+  - name: Meter-level Data
+    description: Energy reported by a meter ECU
+  - name: Inverter-level Data
+    description: Energy and telemetry per inverter / per channel
+  - name: Storage-level Data
+    description: Power and energy for a storage ECU
+security:
+  - SignatureAuth: []
+paths:
+  /user/api/v2/systems/details/{sid}:
+    get:
+      tags: [System Details]
+      operationId: getSystemDetails
+      summary: Get details for a particular system
+      description: Returns the details of the system you searched for.
+      parameters:
+        - $ref: '#/components/parameters/Sid'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ResponseEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/SystemDetails'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/ServerError'
+  /user/api/v2/systems/inverters/{sid}:
+    get:
+      tags: [System Details]
+      operationId: getSystemInverters
+      summary: Get inverters (devices) for a particular system
+      description: Returns all the devices of a system you searched for, sorted by ECU.
+      parameters:
+        - $ref: '#/components/parameters/Sid'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ResponseEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        description: List of the devices sorted by ECU.
+                        items:
+                          $ref: '#/components/schemas/EcuDevice'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/ServerError'
+  /user/api/v2/systems/meters/{sid}:
+    get:
+      tags: [System Details]
+      operationId: getSystemMeters
+      summary: Get meters for a particular system
+      description: Returns all the meters of a system you searched for.
+      parameters:
+        - $ref: '#/components/parameters/Sid'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ResponseEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        description: List of the meters.
+                        items:
+                          type: object
+                          additionalProperties: true
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/ServerError'
+  /user/api/v2/systems/summary/{sid}:
+    get:
+      tags: [System-level Data]
+      operationId: getSystemSummaryEnergy
+      summary: Get summary energy for a particular system
+      description: Returns the accumulative energy reported by inverters of the system.
+      parameters:
+        - $ref: '#/components/parameters/Sid'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ResponseEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/SummaryEnergy'
+              example:
+                data:
+                  today: '12.28'
+                  month: '12.28'
+                  year: '12.28'
+                  lifetime: '12.28'
+                code: 0
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/ServerError'
+  /user/api/v2/systems/energy/{sid}:
+    get:
+      tags: [System-level Data]
+      operationId: getSystemEnergyInPeriod
+      summary: Get energy in period for a particular system
+      description: |
+        Returns accumulative energy reported by inverters for the system at the
+        requested level:
+
+        - `hourly`: hourly energy in a day; list length 24 (hours 0-23).
+        - `daily`: daily energy in a natural month; length equals days in month.
+        - `monthly`: monthly energy in a natural year; length 12.
+        - `yearly`: yearly energy in a lifetime; length equals years since installation.
+
+        The format of `date_range` depends on `energy_level`. If `date_range` is
+        later than the current time, the request is rejected.
+      parameters:
+        - $ref: '#/components/parameters/Sid'
+        - name: energy_level
+          in: query
+          required: true
+          schema:
+            $ref: '#/components/schemas/EnergyLevel'
+        - $ref: '#/components/parameters/DateRange'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ResponseEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        description: Energy list, unit kWh. Length is stable per mode.
+                        items:
+                          type: string
+              example:
+                data: ['567.23', '550.32', '320.12']
+                code: 0
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/ServerError'
+  /user/api/v2/systems/{sid}/devices/ecu/summary/{eid}:
+    get:
+      tags: [ECU-level Data]
+      operationId: getEcuSummaryEnergy
+      summary: Get summary energy for a particular ECU
+      description: Returns the accumulative energy reported by inverters below the ECU.
+      parameters:
+        - $ref: '#/components/parameters/Sid'
+        - $ref: '#/components/parameters/Eid'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ResponseEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/SummaryEnergy'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/ServerError'
+  /user/api/v2/systems/{sid}/devices/ecu/energy/{eid}:
+    get:
+      tags: [ECU-level Data]
+      operationId: getEcuEnergyInPeriod
+      summary: Get energy in period for a particular ECU
+      description: |
+        Returns accumulative energy reported by inverters below the ECU at the
+        requested level (`minutely`, `hourly`, `daily`, `monthly`, `yearly`).
+
+        - `hourly`-`yearly`: returns a plain energy list (unit kWh), stable length.
+        - `minutely` (`date_range` format `yyyy-MM-dd`): returns an object with
+          `time` (HH:mm), `energy` (kWh), `power` (W) and `today` (kWh) lists.
+
+        If `date_range` is later than the current time, the request is rejected.
+      parameters:
+        - $ref: '#/components/parameters/Sid'
+        - $ref: '#/components/parameters/Eid'
+        - name: energy_level
+          in: query
+          required: true
+          schema:
+            $ref: '#/components/schemas/EnergyLevel'
+        - $ref: '#/components/parameters/DateRange'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ResponseEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        oneOf:
+                          - type: array
+                            description: Energy list (hourly/daily/monthly/yearly), unit kWh.
+                            items:
+                              type: string
+                          - $ref: '#/components/schemas/MinutelyEcuData'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/ServerError'
+  /user/api/v2/systems/{sid}/devices/meter/summary/{eid}:
+    get:
+      tags: [Meter-level Data]
+      operationId: getMeterSummaryEnergy
+      summary: Get summary energy for a particular meter
+      description: Returns the accumulative energy reported by the meter ECU.
+      parameters:
+        - $ref: '#/components/parameters/Sid'
+        - $ref: '#/components/parameters/MeterEid'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ResponseEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/MeterSummary'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/ServerError'
+  /user/api/v2/systems/{sid}/devices/meter/period/{eid}:
+    get:
+      tags: [Meter-level Data]
+      operationId: getMeterEnergyInPeriod
+      summary: Get energy in period for a particular meter
+      description: |
+        Returns accumulative energy reported by the meter ECU at the requested
+        level (`minutely`, `hourly`, `daily`, `monthly`, `yearly`).
+
+        - `hourly`-`yearly`: returns an object with `time` plus `produced`,
+          `consumed`, `imported`, `exported` lists (unit kWh).
+        - `minutely` (`date_range` format `yyyy-MM-dd`): returns an object with
+          `today`, `time` (HH:mm), `power` and `energy` maps, unit kWh / W.
+
+        If `date_range` is later than the current time, the request is rejected.
+      parameters:
+        - $ref: '#/components/parameters/Sid'
+        - $ref: '#/components/parameters/MeterEid'
+        - name: energy_level
+          in: query
+          required: true
+          schema:
+            $ref: '#/components/schemas/EnergyLevel'
+        - $ref: '#/components/parameters/DateRange'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ResponseEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        oneOf:
+                          - $ref: '#/components/schemas/MeterPeriodData'
+                          - $ref: '#/components/schemas/MinutelyMeterData'
+              example:
+                code: 0
+                data:
+                  time: ['01', '02']
+                  produced: ['40.300', '50.016']
+                  consumed: ['40.300', '50.016']
+                  imported: ['40.300', '50.016']
+                  exported: ['40.300', '50.016']
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/ServerError'
+  /user/api/v2/systems/{sid}/devices/inverter/summary/{uid}:
+    get:
+      tags: [Inverter-level Data]
+      operationId: getInverterSummaryEnergy
+      summary: Get summary energy for a particular inverter
+      description: Returns per-channel energy of the inverter (channels 1-4).
+      parameters:
+        - $ref: '#/components/parameters/Sid'
+        - $ref: '#/components/parameters/Uid'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ResponseEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/InverterChannelSummary'
+              example:
+                data:
+                  d1: '12.28'
+                  m1: '12.28'
+                  y1: '12.28'
+                  t1: '12.28'
+                  d2: '12.28'
+                  m2: '12.28'
+                  y2: '12.28'
+                  t2: '12.28'
+                  d3: '12.28'
+                  m3: '12.28'
+                  y3: '12.28'
+                  t3: '12.28'
+                  d4: '12.28'
+                  m4: '12.28'
+                  y4: '12.28'
+                  t4: '12.28'
+                code: 0
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/ServerError'
+  /user/api/v2/systems/{sid}/devices/inverter/energy/{uid}:
+    get:
+      tags: [Inverter-level Data]
+      operationId: getInverterEnergyInPeriod
+      summary: Get energy in period for a particular inverter
+      description: |
+        Returns per-channel accumulative energy below the inverter at the
+        requested level (`minutely`, `hourly`, `daily`, `monthly`, `yearly`).
+
+        - `hourly`-`yearly`: returns `e1`-`e4` energy lists per channel (kWh).
+        - `minutely` (`date_range` format `yyyy-MM-dd`): returns time plus DC/AC
+          telemetry lists (`dc_p*`, `dc_i*`, `dc_v*`, `dc_e*`, `ac_v*`, `ac_t`,
+          `ac_p`, `ac_f`).
+
+        If `date_range` is later than the current time, the request is rejected.
+      parameters:
+        - $ref: '#/components/parameters/Sid'
+        - $ref: '#/components/parameters/Uid'
+        - name: energy_level
+          in: query
+          required: true
+          schema:
+            $ref: '#/components/schemas/EnergyLevel'
+        - $ref: '#/components/parameters/DateRange'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ResponseEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        oneOf:
+                          - $ref: '#/components/schemas/InverterPeriodData'
+                          - $ref: '#/components/schemas/MinutelyInverterData'
+              example:
+                data:
+                  e1: ['567.23', '550.32', '320.12']
+                  e2: ['567.23', '550.32', '320.12']
+                code: 0
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/ServerError'
+  /user/api/v2/systems/{sid}/devices/inverter/batch/energy/{eid}:
+    get:
+      tags: [Inverter-level Data]
+      operationId: getInverterBatchEnergy
+      summary: Get energy in a day for all inverters below a particular ECU
+      description: |
+        Batch query for all inverters below an ECU for one day.
+
+        - `energy_level=power`: returns `time` (HH:mm) and `power` lists, where
+          power entries are keyed by `uid-channel` (e.g. `701000001234-1`), unit W.
+        - `energy_level=energy`: returns an `energy` list with string entries in
+          the format `uid-channel-energy` (e.g. `701000001234-1-1.24`), unit kWh.
+
+        If `date_range` is later than the current time, the request is rejected.
+      parameters:
+        - $ref: '#/components/parameters/Sid'
+        - $ref: '#/components/parameters/Eid'
+        - name: energy_level
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [power, energy]
+        - name: date_range
+          in: query
+          required: true
+          description: The date to query, format `yyyy-MM-dd`.
+          schema:
+            type: string
+            example: '2025-07-18'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ResponseEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        oneOf:
+                          - $ref: '#/components/schemas/BatchPowerData'
+                          - $ref: '#/components/schemas/BatchEnergyData'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/ServerError'
+  /user/api/v2/systems/{sid}/devices/storage/latest/{eid}:
+    get:
+      tags: [Storage-level Data]
+      operationId: getStorageLatestPower
+      summary: Get latest power for a particular storage
+      description: Returns the latest status of a storage ECU.
+      parameters:
+        - $ref: '#/components/parameters/Sid'
+        - $ref: '#/components/parameters/Eid'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ResponseEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/StorageLatest'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/ServerError'
+  /user/api/v2/systems/{sid}/devices/storage/summary/{eid}:
+    get:
+      tags: [Storage-level Data]
+      operationId: getStorageSummaryEnergy
+      summary: Get summary energy for a particular storage
+      description: Returns the accumulative energy reported by the storage ECU.
+      parameters:
+        - $ref: '#/components/parameters/Sid'
+        - $ref: '#/components/parameters/Eid'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ResponseEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/StorageSummary'
+              example:
+                data:
+                  today:
+                    discharge: '394.408'
+                    charge: '0.000'
+                    produced: '560.523'
+                    consumed: '560.523'
+                    exported: '560.523'
+                    imported: '833.884'
+                  month:
+                    discharge: '394.408'
+                    charge: '0.000'
+                    produced: '560.523'
+                    consumed: '560.523'
+                    exported: '560.523'
+                    imported: '833.884'
+                  year:
+                    discharge: '394.408'
+                    charge: '0.000'
+                    produced: '560.523'
+                    consumed: '560.523'
+                    exported: '560.523'
+                    imported: '833.884'
+                  lifetime:
+                    discharge: '394.408'
+                    charge: '0.000'
+                    produced: '560.523'
+                    consumed: '560.523'
+                    exported: '560.523'
+                    imported: '833.884'
+                code: 0
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/ServerError'
+  /user/api/v2/systems/{sid}/devices/storage/period/{eid}:
+    get:
+      tags: [Storage-level Data]
+      operationId: getStorageEnergyInPeriod
+      summary: Get energy in period for a particular storage
+      description: |
+        Returns accumulative energy reported for the storage ECU at the requested
+        level (`minutely`, `hourly`, `daily`, `monthly`, `yearly`).
+
+        - `hourly`-`yearly`: returns `time` plus `discharge`, `charge`,
+          `produced`, `consumed`, `exported`, `imported` lists (unit kWh).
+        - `minutely` (`date_range` format `yyyy-MM-dd`): returns `today`, `time`
+          (HH:mm), `power` and `energy` maps (unit kWh / W).
+
+        If `date_range` is later than the current time, the request is rejected.
+      parameters:
+        - $ref: '#/components/parameters/Sid'
+        - $ref: '#/components/parameters/Eid'
+        - name: energy_level
+          in: query
+          required: true
+          schema:
+            $ref: '#/components/schemas/EnergyLevel'
+        - $ref: '#/components/parameters/DateRange'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ResponseEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        oneOf:
+                          - $ref: '#/components/schemas/StoragePeriodData'
+                          - $ref: '#/components/schemas/MinutelyStorageData'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/ServerError'
+components:
+  securitySchemes:
+    SignatureAuth:
+      type: apiKey
+      in: header
+      description: |
+        HMAC signature authentication. Five headers are required on every
+        request: `X-CA-AppId`, `X-CA-Timestamp`, `X-CA-Nonce`,
+        `X-CA-Signature-Method` (`HmacSHA256` or `HmacSHA1`) and `X-CA-Signature`
+        (Base64 HMAC of the App Secret over `stringToSign`; see the API
+        description for the exact construction).
+      name: X-CA-Signature
+  parameters:
+    Sid:
+      name: sid
+      in: path
+      required: true
+      description: The unique identity id of the system.
+      schema:
+        type: string
+    Eid:
+      name: eid
+      in: path
+      required: true
+      description: The identity id of the ECU. For shared sub-user systems, use the virtual ECU number (after the `-`).
+      schema:
+        type: string
+    MeterEid:
+      name: eid
+      in: path
+      required: true
+      description: The identity id of the meter ECU.
+      schema:
+        type: string
+    Uid:
+      name: uid
+      in: path
+      required: true
+      description: The identity id of the inverter.
+      schema:
+        type: string
+    DateRange:
+      name: date_range
+      in: query
+      required: false
+      description: |
+        The date range to calculate the accumulative energy. The format depends
+        on `energy_level`:
+
+        - `minutely`: `yyyy-MM-dd`
+        - `hourly`: `yyyy-MM-dd`
+        - `daily`: `yyyy-MM`
+        - `monthly`: `yyyy`
+        - `yearly`: not required
+      schema:
+        type: string
+  schemas:
+    ResponseEnvelope:
+      type: object
+      required: [code]
+      properties:
+        code:
+          type: integer
+          description: Response code. Refer to the response code definition (0 = success).
+          example: 0
+    SystemDetails:
+      type: object
+      properties:
+        sid:
+          type: string
+          description: Unique identity id of the system.
+        create_date:
+          type: string
+          format: date
+          description: Register date of the system in EMA.
+        capacity:
+          type: string
+          description: System size. Default unit is kW.
+        type:
+          type: integer
+          description: |
+            System type. Default 1.
+            1 = PV system, 2 = Storage system, 3 = PV & storage system.
+          example: 1
+        timezone:
+          type: string
+          description: The timezone the ECU belongs to.
+          example: Asia/Shanghai
+        ecu:
+          type: array
+          description: |
+            ECU ids registered in this system. An id such as
+            `2030000001236-002405253708` denotes a shared sub-user system: the
+            main ECU number comes before the `-`, followed by the sub-user
+            virtual ECU number. Subsequent data queries must use the virtual
+            ECU number as `eid`.
+          items:
+            type: string
+        light:
+          type: integer
+          description: |
+            System status light.
+            1 = Green (functioning normally), 2 = Yellow (some micro-inverters
+            have alarms or are not properly registered), 3 = Red (ECU network
+            connection issue), 4 = Grey (no data uploaded from this ECU yet).
+          example: 1
+        authorization_code:
+          type: string
+          description: Generated when 'Allow visitors to access this system' is enabled; used for embedded websites (iframe).
+    EcuDevice:
+      type: object
+      properties:
+        eid:
+          type: string
+          description: Unique identity id of the ECU.
+        type:
+          type: integer
+          description: |
+            Type of the ECU. Default 0.
+            0 = ECU, 1 = ECU with meter activated, 2 = ECU with storage activated.
+          example: 0
+        timezone:
+          type: string
+          description: The timezone the ECU belongs to.
+        inverter:
+          type: array
+          description: List of the inverters connected to the ECU.
+          items:
+            type: object
+            properties:
+              uid:
+                type: string
+                description: Unique identity id of the inverter.
+              type:
+                type: string
+                description: Type of the inverter.
+                example: QT2D
+              model:
+                type: string
+                description: Model of the storage-activated ECU.
+              capacity:
+                type: string
+                description: Capacity of the storage-activated ECU. Default unit is kWh.
+    SummaryEnergy:
+      type: object
+      properties:
+        today:
+          type: string
+          description: Accumulative energy reported by inverters today. Unit kWh.
+        month:
+          type: string
+          description: Accumulative energy reported by inverters this month. Unit kWh.
+        year:
+          type: string
+          description: Accumulative energy reported by inverters this year. Unit kWh.
+        lifetime:
+          type: string
+          description: Accumulative energy reported by inverters in the lifetime of the system. Unit kWh.
+    EnergyLevel:
+      type: string
+      description: The energy level to calculate the accumulative energy.
+      enum: [minutely, hourly, daily, monthly, yearly]
+    MinutelyEcuData:
+      type: object
+      properties:
+        time:
+          type: array
+          description: Time list, each point in HH:mm format.
+          items:
+            type: string
+        energy:
+          type: array
+          description: Energy list, corresponding to time. Unit kWh.
+          items:
+            type: string
+        power:
+          type: array
+          description: Power list, corresponding to time. Unit W.
+          items:
+            type: string
+        today:
+          type: string
+          description: Accumulative energy produced on the day. Unit kWh.
+    MeterSummary:
+      type: object
+      properties:
+        today:
+          $ref: '#/components/schemas/MeterEnergyBreakdown'
+        month:
+          $ref: '#/components/schemas/MeterEnergyBreakdown'
+        year:
+          $ref: '#/components/schemas/MeterEnergyBreakdown'
+        lifetime:
+          $ref: '#/components/schemas/MeterEnergyBreakdown'
+    MeterEnergyBreakdown:
+      type: object
+      properties:
+        consumed:
+          type: string
+          description: Consumed energy. Unit kWh.
+        exported:
+          type: string
+          description: Exported energy. Unit kWh.
+        imported:
+          type: string
+          description: Imported energy. Unit kWh.
+        produced:
+          type: string
+          description: Produced energy. Unit kWh.
+    MeterPeriodData:
+      type: object
+      properties:
+        time:
+          type: array
+          description: Time list (hourly/daily/monthly/yearly modes).
+          items:
+            type: string
+        produced:
+          type: array
+          items:
+            type: string
+        consumed:
+          type: array
+          items:
+            type: string
+        imported:
+          type: array
+          items:
+            type: string
+        exported:
+          type: array
+          items:
+            type: string
+    MinutelyMeterData:
+      type: object
+      properties:
+        today:
+          $ref: '#/components/schemas/MeterEnergyBreakdown'
+        time:
+          type: array
+          description: Time list, each point in HH:mm format.
+          items:
+            type: string
+        power:
+          type: object
+          description: Power lists keyed by direction (e.g. consumed, imported_exported, produced). Unit W.
+          additionalProperties:
+            type: array
+            items:
+              type: string
+        energy:
+          type: object
+          description: Energy lists keyed by direction. Unit kWh.
+          additionalProperties:
+            type: array
+            items:
+              type: string
+    InverterChannelSummary:
+      type: object
+      description: Energy list per channel (channels 1-4).
+      properties:
+        d1:
+          type: string
+          description: Accumulative energy reported by channel 1 today.
+        m1:
+          type: string
+          description: Accumulative energy reported by channel 1 this month.
+        y1:
+          type: string
+          description: Accumulative energy reported by channel 1 this year.
+        t1:
+          type: string
+          description: Accumulative energy reported by channel 1 in the lifetime.
+        d2:
+          type: string
+          description: Accumulative energy reported by channel 2 today.
+        m2:
+          type: string
+          description: Accumulative energy reported by channel 2 this month.
+        y2:
+          type: string
+          description: Accumulative energy reported by channel 2 this year.
+        t2:
+          type: string
+          description: Accumulative energy reported by channel 2 in the lifetime.
+        d3:
+          type: string
+          description: Accumulative energy reported by channel 3 today.
+        m3:
+          type: string
+          description: Accumulative energy reported by channel 3 this month.
+        y3:
+          type: string
+          description: Accumulative energy reported by channel 3 this year.
+        t3:
+          type: string
+          description: Accumulative energy reported by channel 3 in the lifetime.
+        d4:
+          type: string
+          description: Accumulative energy reported by channel 4 today.
+        m4:
+          type: string
+          description: Accumulative energy reported by channel 4 this month.
+        y4:
+          type: string
+          description: Accumulative energy reported by channel 4 this year.
+        t4:
+          type: string
+          description: Accumulative energy reported by channel 4 in the lifetime.
+    InverterPeriodData:
+      type: object
+      description: Energy list per channel for hourly/daily/monthly/yearly modes. Unit kWh.
+      properties:
+        e1:
+          type: array
+          description: Energy list reported by channel 1.
+          items:
+            type: string
+        e2:
+          type: array
+          description: Energy list reported by channel 2.
+          items:
+            type: string
+        e3:
+          type: array
+          description: Energy list reported by channel 3.
+          items:
+            type: string
+        e4:
+          type: array
+          description: Energy list reported by channel 4.
+          items:
+            type: string
+    MinutelyInverterData:
+      type: object
+      description: Telemetry lists for minutely mode.
+      properties:
+        t:
+          type: array
+          description: Time list, each point in HH:mm format.
+          items:
+            type: string
+        dc_p1:
+          type: array
+          description: DC power on channel 1. Unit W.
+          items:
+            type: string
+        dc_p2:
+          type: array
+          description: DC power on channel 2. Unit W.
+          items:
+            type: string
+        dc_p3:
+          type: array
+          description: DC power on channel 3. Unit W.
+          items:
+            type: string
+        dc_p4:
+          type: array
+          description: DC power on channel 4. Unit W.
+          items:
+            type: string
+        dc_i1:
+          type: array
+          description: DC current on channel 1.
+          items:
+            type: string
+        dc_i2:
+          type: array
+          description: DC current on channel 2.
+          items:
+            type: string
+        dc_i3:
+          type: array
+          description: DC current on channel 3.
+          items:
+            type: string
+        dc_i4:
+          type: array
+          description: DC current on channel 4.
+          items:
+            type: string
+        dc_v1:
+          type: array
+          description: DC voltage on channel 1.
+          items:
+            type: string
+        dc_v2:
+          type: array
+          description: DC voltage on channel 2.
+          items:
+            type: string
+        dc_v3:
+          type: array
+          description: DC voltage on channel 3.
+          items:
+            type: string
+        dc_v4:
+          type: array
+          description: DC voltage on channel 4.
+          items:
+            type: string
+        dc_e1:
+          type: array
+          description: DC energy on channel 1. Unit kWh.
+          items:
+            type: string
+        dc_e2:
+          type: array
+          description: DC energy on channel 2. Unit kWh.
+          items:
+            type: string
+        dc_e3:
+          type: array
+          description: DC energy on channel 3. Unit kWh.
+          items:
+            type: string
+        dc_e4:
+          type: array
+          description: DC energy on channel 4. Unit kWh.
+          items:
+            type: string
+        ac_v1:
+          type: array
+          description: AC voltage on channel 1.
+          items:
+            type: string
+        ac_v2:
+          type: array
+          description: AC voltage on channel 2.
+          items:
+            type: string
+        ac_v3:
+          type: array
+          description: AC voltage on channel 3.
+          items:
+            type: string
+        ac_t:
+          type: array
+          description: AC temperature.
+          items:
+            type: string
+        ac_p:
+          type: array
+          description: AC power. Unit W.
+          items:
+            type: string
+        ac_f:
+          type: array
+          description: AC frequency.
+          items:
+            type: string
+    BatchPowerData:
+      type: object
+      description: Response for energy_level=power.
+      properties:
+        time:
+          type: array
+          description: Time list, each point in HH:mm format.
+          items:
+            type: string
+        power:
+          type: object
+          description: |
+            Power lists keyed by `uid-channel` (e.g. `701000001234-1`), each
+            corresponding to time. Unit W.
+          additionalProperties:
+            type: array
+            items:
+              type: string
+    BatchEnergyData:
+      type: object
+      description: Response for energy_level=energy.
+      properties:
+        energy:
+          type: array
+          description: |
+            Energy entries in the format `uid-channel-energy`
+            (e.g. `701000001234-1-1.24`). Unit kWh.
+          items:
+            type: string
+    StorageLatest:
+      type: object
+      properties:
+        mode:
+          type: string
+          description: Storage operation mode.
+        soc:
+          type: string
+          description: Battery state of charge. Unit %.
+        discharge:
+          type: string
+          description: Last discharge power. Unit W.
+        charge:
+          type: string
+          description: Last charge power. Unit W.
+        produced:
+          type: string
+          description: Last produced power. Unit W.
+        consumed:
+          type: string
+          description: Last consumed power. Unit W.
+        exported:
+          type: string
+          description: Last exported power. Unit W.
+        imported:
+          type: string
+          description: Last imported power. Unit W.
+    StorageSummary:
+      type: object
+      properties:
+        today:
+          $ref: '#/components/schemas/StorageEnergyBreakdown'
+        month:
+          $ref: '#/components/schemas/StorageEnergyBreakdown'
+        year:
+          $ref: '#/components/schemas/StorageEnergyBreakdown'
+        lifetime:
+          $ref: '#/components/schemas/StorageEnergyBreakdown'
+    StorageEnergyBreakdown:
+      type: object
+      properties:
+        discharge:
+          type: string
+          description: Discharged energy. Unit kWh.
+        charge:
+          type: string
+          description: Charged energy. Unit kWh.
+        produced:
+          type: string
+          description: Produced energy. Unit kWh.
+        consumed:
+          type: string
+          description: Consumed energy. Unit kWh.
+        exported:
+          type: string
+          description: Exported energy. Unit kWh.
+        imported:
+          type: string
+          description: Imported energy. Unit kWh.
+    StoragePeriodData:
+      type: object
+      description: Response for hourly/daily/monthly/yearly modes. Unit kWh.
+      properties:
+        time:
+          type: array
+          items:
+            type: string
+        discharge:
+          type: array
+          items:
+            type: string
+        charge:
+          type: array
+          items:
+            type: string
+        produced:
+          type: array
+          items:
+            type: string
+        consumed:
+          type: array
+          items:
+            type: string
+        exported:
+          type: array
+          items:
+            type: string
+        imported:
+          type: array
+          items:
+            type: string
+    MinutelyStorageData:
+      type: object
+      description: Response for minutely mode.
+      properties:
+        today:
+          $ref: '#/components/schemas/StorageEnergyBreakdown'
+        time:
+          type: array
+          description: Time list, each point in HH:mm format.
+          items:
+            type: string
+        power:
+          type: object
+          description: Power lists keyed by direction. Unit W.
+          additionalProperties:
+            type: array
+            items:
+              type: string
+        energy:
+          type: object
+          description: Energy lists keyed by direction. Unit kWh.
+          additionalProperties:
+            type: array
+            items:
+              type: string
+  responses:
+    BadRequest:
+      description: Request parameter exception (code 4000/4001) or other business error.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ResponseEnvelope'
+          example:
+            code: 4001
+    Unauthorized:
+      description: Application account or access token exception (codes 2000-3004).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ResponseEnvelope'
+          example:
+            code: 2002
+    ServerError:
+      description: Internal server or communication exception (codes 5000, 6000, 7000-7003).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ResponseEnvelope'
+          example:
+            code: 5000

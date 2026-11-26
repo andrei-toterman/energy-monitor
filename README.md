@@ -1,0 +1,2 @@
+The purpose of this project is to monitor my electricity and gas consumption using my HomeWizard P1 dongle as well as my solar panel generation using the APsystems API, so I can compute monthly cost estimates.
+The HomeWizard P1 dongle and the APsystems API are both queried locally using a NodeMCU (the P1 dongle's NTP-synced timestamp doubles as the device clock). All data is pushed to InfluxDB serverless and visualized in Grafana.
